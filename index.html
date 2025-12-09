@@ -1,38 +1,494 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Santa's Gift Dash</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>聖誕禮物大作戰</title>
     <style>
-      /* Custom snow animation */
-      @keyframes snow {
-        0% { transform: translateY(-10px); }
-        100% { transform: translateY(100vh); }
-      }
-      .snowflake {
-        position: fixed;
-        top: -10px;
-        color: white;
-        animation: snow 10s linear infinite;
-        z-index: 0;
-        pointer-events: none;
-      }
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background: linear-gradient(to bottom, #0f2027, #203a43, #2c5364); /* 冬夜星空背景 */
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            touch-action: none; /* 防止手機上下滑動頁面 */
+        }
+
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* UI 覆蓋層 */
+        #uiLayer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hud {
+            padding: 20px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* 開始與結束畫面 */
+        #startScreen, #gameOverScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            z-index: 10;
+            pointer-events: auto;
+            backdrop-filter: blur(5px);
+        }
+
+        h1 {
+            font-size: 48px;
+            margin-bottom: 10px;
+            color: #ff4d4d; /* 聖誕紅 */
+            text-shadow: 3px 3px 0 #fff, -1px -1px 0 #fff, 1px -1px 0 #fff, -1px 1px 0 #fff, 1px 1px 0 #fff;
+            text-align: center;
+        }
+
+        p {
+            font-size: 18px;
+            margin-bottom: 30px;
+            text-align: center;
+            line-height: 1.5;
+            max-width: 80%;
+        }
+
+        .btn {
+            padding: 15px 40px;
+            font-size: 24px;
+            background: #28a745;
+            color: white;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            transition: transform 0.2s, background 0.2s;
+            font-weight: bold;
+            border: 2px solid white;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+            background: #218838;
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        .score-big {
+            font-size: 60px;
+            color: #ffd700;
+            margin: 10px 0;
+        }
     </style>
-  <script type="importmap">
-{
-  "imports": {
-    "react/": "https://aistudiocdn.com/react@^19.2.1/",
-    "react": "https://aistudiocdn.com/react@^19.2.1",
-    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.32.0",
-    "lucide-react": "https://aistudiocdn.com/lucide-react@^0.556.0",
-    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.1/"
-  }
-}
-</script>
 </head>
-  <body class="bg-slate-900 text-white overflow-hidden touch-none select-none">
-    <div id="root"></div>
-  </body>
+<body>
+
+    <!-- 遊戲畫布 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- HUD 抬頭顯示器 -->
+    <div id="uiLayer">
+        <div class="hud">
+            <div id="scoreDisplay">分數: 0</div>
+            <div id="livesDisplay">生命: ❤️❤️❤️</div>
+        </div>
+    </div>
+
+    <!-- 開始畫面 -->
+    <div id="startScreen">
+        <h1>🎄 聖誕禮物大作戰 🎄</h1>
+        <p>控制聖誕老人接住禮物 🎁<br>避開煤炭 ⚫<br>接住雪花 ❄️ 可以補血！</p>
+        <button class="btn" id="startBtn">開始遊戲</button>
+    </div>
+
+    <!-- 遊戲結束畫面 -->
+    <div id="gameOverScreen" class="hidden">
+        <h1>🎅 遊戲結束 🎅</h1>
+        <p>你的最終分數是</p>
+        <div class="score-big" id="finalScore">0</div>
+        <button class="btn" id="restartBtn">再玩一次</button>
+    </div>
+
+    <script>
+        // --- 遊戲設定 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const scoreDisplay = document.getElementById('scoreDisplay');
+        const livesDisplay = document.getElementById('livesDisplay');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
+        let animationId;
+        let score = 0;
+        let lives = 3;
+        let gameRunning = false;
+        let difficultyMultiplier = 1;
+        let frameCount = 0;
+
+        // 音效 Context
+        let audioCtx;
+
+        // 遊戲物件
+        const player = {
+            x: 0,
+            y: 0,
+            width: 60,
+            height: 60,
+            speed: 10,
+            emoji: '🎅'
+        };
+
+        let items = []; // 掉落物
+        let particles = []; // 特效粒子
+        let bgSnow = []; // 背景雪花
+
+        // --- 初始化與事件監聽 ---
+        
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.y = canvas.height - 100;
+            player.x = canvas.width / 2;
+            initBgSnow();
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // 輸入控制
+        let keys = {};
+        let touchX = null;
+
+        window.addEventListener('keydown', (e) => keys[e.code] = true);
+        window.addEventListener('keyup', (e) => keys[e.code] = false);
+        
+        // 滑鼠/觸控控制
+        canvas.addEventListener('mousemove', (e) => {
+            if(gameRunning) player.x = e.clientX;
+        });
+        
+        canvas.addEventListener('touchmove', (e) => {
+            if(gameRunning) {
+                e.preventDefault();
+                player.x = e.touches[0].clientX;
+            }
+        }, {passive: false});
+
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+
+        // --- 音效系統 (使用 Web Audio API 生成簡單音效) ---
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playSound(type) {
+            if (!audioCtx) return;
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            const osc = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            osc.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            if (type === 'catch') {
+                // 清脆的高音 (鈴聲感)
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(800, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.1);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'heal') {
+                // 柔和的上升音
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(400, audioCtx.currentTime);
+                osc.frequency.linearRampToValueAtTime(600, audioCtx.currentTime + 0.3);
+                gainNode.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                gainNode.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.3);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            } else if (type === 'hit') {
+                // 低沉的噪音
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(150, audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(50, audioCtx.currentTime + 0.3);
+                gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.3);
+                osc.start();
+                osc.stop(audioCtx.currentTime + 0.3);
+            }
+        }
+
+        // --- 遊戲邏輯 ---
+
+        function initBgSnow() {
+            bgSnow = [];
+            for(let i=0; i<50; i++) {
+                bgSnow.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: Math.random() * 2 + 1,
+                    speed: Math.random() * 1 + 0.5
+                });
+            }
+        }
+
+        function spawnItem() {
+            const rand = Math.random();
+            let type = 'gift';
+            let emoji = '🎁';
+            let speed = (3 + Math.random() * 3) * difficultyMultiplier;
+            let scoreVal = 10;
+
+            if (rand < 0.25) { // 25% 機率是煤炭
+                type = 'coal';
+                emoji = '⚫';
+                scoreVal = 0;
+                speed *= 1.2; // 煤炭掉比較快
+            } else if (rand > 0.95) { // 5% 機率是愛心雪花
+                type = 'snow';
+                emoji = '❄️';
+                scoreVal = 5;
+                speed *= 0.8; // 雪花飄比較慢
+            } else {
+                // 隨機禮物顏色
+                const gifts = ['🎁', '🎀', '🧸', '🔔'];
+                emoji = gifts[Math.floor(Math.random() * gifts.length)];
+            }
+
+            items.push({
+                x: Math.random() * (canvas.width - 40) + 20,
+                y: -50,
+                size: 30,
+                type: type,
+                emoji: emoji,
+                speed: speed,
+                scoreVal: scoreVal,
+                angle: 0,
+                spinSpeed: (Math.random() - 0.5) * 0.1
+            });
+        }
+
+        function createParticles(x, y, color) {
+            for(let i=0; i<10; i++) {
+                particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 10,
+                    vy: (Math.random() - 0.5) * 10,
+                    life: 1,
+                    color: color
+                });
+            }
+        }
+
+        function startGame() {
+            initAudio();
+            startScreen.classList.add('hidden');
+            gameOverScreen.classList.add('hidden');
+            
+            score = 0;
+            lives = 3;
+            difficultyMultiplier = 1;
+            items = [];
+            particles = [];
+            gameRunning = true;
+            frameCount = 0;
+            
+            player.x = canvas.width / 2;
+            updateUI();
+            
+            if(animationId) cancelAnimationFrame(animationId);
+            loop();
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            playSound('hit');
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.classList.remove('hidden');
+        }
+
+        function updateUI() {
+            scoreDisplay.textContent = `分數: ${score}`;
+            let hearts = '';
+            for(let i=0; i<lives; i++) hearts += '❤️';
+            livesDisplay.textContent = `生命: ${hearts}`;
+        }
+
+        function update() {
+            // 難度隨時間增加
+            frameCount++;
+            if (frameCount % 600 === 0) { // 每10秒增加難度
+                difficultyMultiplier += 0.1;
+            }
+
+            // 產生掉落物
+            if (frameCount % Math.max(20, Math.floor(60 / difficultyMultiplier)) === 0) {
+                spawnItem();
+            }
+
+            // 鍵盤移動
+            if (keys['ArrowLeft'] || keys['KeyA']) player.x -= player.speed;
+            if (keys['ArrowRight'] || keys['KeyD']) player.x += player.speed;
+
+            // 邊界檢查
+            if (player.x < player.width/2) player.x = player.width/2;
+            if (player.x > canvas.width - player.width/2) player.x = canvas.width - player.width/2;
+
+            // 更新背景雪花
+            bgSnow.forEach(flake => {
+                flake.y += flake.speed;
+                if(flake.y > canvas.height) {
+                    flake.y = -5;
+                    flake.x = Math.random() * canvas.width;
+                }
+            });
+
+            // 更新掉落物
+            for (let i = items.length - 1; i >= 0; i--) {
+                let item = items[i];
+                item.y += item.speed;
+                item.angle += item.spinSpeed;
+
+                // 碰撞檢測 (距離判定)
+                const dx = item.x - player.x;
+                const dy = item.y - (player.y - 10); // 稍微修正碰撞中心
+                const distance = Math.sqrt(dx*dx + dy*dy);
+
+                if (distance < player.width/2 + item.size/2) {
+                    // 接到了
+                    if (item.type === 'coal') {
+                        lives--;
+                        playSound('hit');
+                        createParticles(item.x, item.y, '#333');
+                        if (lives <= 0) gameOver();
+                    } else if (item.type === 'snow') {
+                        if(lives < 3) lives++;
+                        score += item.scoreVal;
+                        playSound('heal');
+                        createParticles(item.x, item.y, '#fff');
+                    } else {
+                        score += item.scoreVal;
+                        playSound('catch');
+                        createParticles(item.x, item.y, '#ffD700');
+                    }
+                    updateUI();
+                    items.splice(i, 1);
+                    continue;
+                }
+
+                // 超出底部
+                if (item.y > canvas.height + 50) {
+                    items.splice(i, 1);
+                }
+            }
+
+            // 更新粒子
+            for (let i = particles.length - 1; i >= 0; i--) {
+                let p = particles[i];
+                p.x += p.vx;
+                p.y += p.vy;
+                p.life -= 0.05;
+                if(p.life <= 0) particles.splice(i, 1);
+            }
+        }
+
+        function draw() {
+            // 清空畫布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 繪製背景雪花
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            bgSnow.forEach(flake => {
+                ctx.beginPath();
+                ctx.arc(flake.x, flake.y, flake.radius, 0, Math.PI*2);
+                ctx.fill();
+            });
+
+            // 繪製玩家
+            ctx.font = `${player.width}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            // 加上陰影
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.shadowBlur = 10;
+            ctx.save();
+            // 移動時的傾斜效果
+            let tilt = 0;
+            if (keys['ArrowLeft']) tilt = -0.2;
+            if (keys['ArrowRight']) tilt = 0.2;
+            
+            ctx.translate(player.x, player.y);
+            ctx.rotate(tilt);
+            ctx.fillText(player.emoji, 0, 0);
+            ctx.restore();
+
+            // 繪製掉落物
+            items.forEach(item => {
+                ctx.save();
+                ctx.translate(item.x, item.y);
+                ctx.rotate(item.angle);
+                ctx.font = `${item.size}px Arial`;
+                ctx.fillText(item.emoji, 0, 0);
+                ctx.restore();
+            });
+
+            // 繪製粒子
+            ctx.shadowBlur = 0;
+            particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 5, 0, Math.PI*2);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            });
+        }
+
+        function loop() {
+            if (!gameRunning) return;
+            update();
+            draw();
+            animationId = requestAnimationFrame(loop);
+        }
+
+    </script>
+</body>
 </html>
